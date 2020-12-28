@@ -1,0 +1,19 @@
+CREATE DATABASE ratelimiter;
+
+use ratelimiter;
+
+drop table if exists configuration;
+
+create table configuration(
+ id int auto_increment,
+ username varchar(255) not null,
+ http_func varchar(15) not null,
+ uri varchar(255) not null,
+ module varchar(255) not null,
+ throttle_limit int default 10,
+ time_limit int default 1,
+ created_on TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+ update_on TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+ status varchar(255) not null,
+ primary key(id)
+);

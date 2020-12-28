@@ -1,0 +1,173 @@
+Pre-requisite 
+Java 8.0.
+
+MariaDB is being used for the storage of the data
+
+Please run the below commands to start the docker
+
+docker run --name blue-optima-mariadb -p 3307:3306 -e MYSQL_ROOT_PASSWORD=blueoptima -d mariadb/server:10.4
+
+docker exec -it blue-optima-mariadb bash
+
+create the schema as mentioned in schema.sql
+
+##Redis - docker 
+
+docker run --name blue-optima-redis -p 6379:6379 -d redis
+
+docker exec -it blue-optima-redis bash
+
+######################################
+
+
+There are 2 module which are developed here.
+1). rate-limiter-configurer
+2). rate-limiter
+
+The role of the rate-limiter-configurer is to update the rate limiter configuration.The
+mariadb is the database which is used for updating the confguration details.
+
+
+This creates the record in the ratelimiter db.
+
+curl -X POST \
+  http://localhost:8081/api/v1/internal/rate/limiter/config \
+  -H 'cache-control: no-cache' \
+  -H 'content-type: application/json' \
+  -H 'postman-token: c1e45eba-95bf-f6f9-72bd-090941002b85' \
+  -d '{
+	"username" : "testuser",
+	"http_func" : "post",
+	"uri" : "/a1/v1/test2",
+	"module" : "test-module",
+	"throttle_limit" : 200,
+	"time_limit" : 200,
+	"status" : "active"
+}'
+
+
+PUT request is used for updating the existing request.If the request is not there it will create a new one.
+
+curl -X PUT \
+  http://localhost:8081/api/v1/internal/rate/limiter/config \
+  -H 'cache-control: no-cache' \
+  -H 'content-type: application/json' \
+  -H 'postman-token: d5850e0e-effe-4355-c915-379c4bb4f59d' \
+  -d '{
+	"username" : "testuser",
+	"http_func" : "post",
+	"uri" : "/a1/v1/test2",
+	"module" : "test-module",
+	"throttle_limit" : 200,
+	"time_limit" : 150,
+	"status" : "active"
+}'
+
+Getting all the rate limiting conditions for a user "testuser"
+
+curl -X GET \
+  http://localhost:8081/api/v1/internal/rate/limiter/user/testuser \
+  -H 'cache-control: no-cache' \
+  -H 'content-type: application/json' \
+  -H 'postman-token: d4c0ce0e-067d-f325-abc3-8f10afcf0ecf'
+
+Response
+
+[
+    {
+        "username": "testuser",
+        "http_func": "put",
+        "uri": "http://localhost/a1/v1/test1",
+        "module": "test-module",
+        "throttle_limit": 20,
+        "time_limit": 1,
+        "status": "active"
+    },
+    {
+        "username": "testuser",
+        "http_func": "put",
+        "uri": "/a1/v1/test2",
+        "module": "test-module",
+        "throttle_limit": 20,
+        "time_limit": 120,
+        "status": "active"
+    },
+    {
+        "username": "testuser",
+        "http_func": "post",
+        "uri": "/a1/v1/test2",
+        "module": "test-module",
+        "throttle_limit": 200,
+        "time_limit": 180,
+        "status": "active"
+    },
+    {
+        "username": "testuser",
+        "http_func": "post",
+        "uri": "/a1/v1/test2",
+        "module": "test-module",
+        "throttle_limit": 200,
+        "time_limit": 200,
+        "status": "active"
+    },
+    {
+        "username": "testuser",
+        "http_func": "post",
+        "uri": "/a1/v1/test2",
+        "module": "test-module",
+        "throttle_limit": 200,
+        "time_limit": 150,
+        "status": "active"
+    }
+]
+
+
+The 2nd module is rate-limiter
+
+
+
+Assumption -
+-----------
+This is the assumption that in the distributed environment;rate-limiter-configurer
+will be setting the value in the DB.On the actual production environment we will be having
+the queues(kafka queues) where this module will be pushing the data which we are inserting in the
+mariaDB and the all the other modules which wants to listen to the updates received from
+the rate-limiter-configurer.All the modules(which are using the rate-limiter libearary for
+rate-limiting the requests) will listen to the evenets required by them.
+
+Example- If the rate-limiter is integrated with module A and B.Then rate-limiter-configurer
+will issue the events related with both the modules A and B.They both will will subscribe to 
+the events which are related with them.A is not interested in the rate limiting events for
+B and vice-versa.
+
+- The other assumption is that we will be using the redis-cluster to make the count in sync
+for each node.All the keys will be segrated across the cluster and each node in the
+cluster will be having master-slave sort of arch. This way it will be super stable.
+
+===================
+
+There can be 2 approaches here.
+
+1). integrate the rate-limiter as a library in other modules.This approach is simple and faster
+ to as we don't need any inter-process communication.
+2). Use the rate-limiter as a separate module which will run independently from the service 
+module.This will run as a demon service in the service host.There will be a client lib. which
+will be implemented in the native language, which will interact with the rate-limiter service 
+based on tcp or udp.The advantage of this is that rate-limiter is completely independent 
+of the main service.If this service failes then we can allow every request to pass.
+
+Here we are using the 1st approach.
+
+As we can not have this sort of environment here.I have tried to simulate it by using
+the DB as the queue.Rate-limiter will read all the events which will be stored in the 
+DB after 10 seconds and schedule the update in the cache with the ttl value as time_limit.
+
+If we mark any event as inactive or remove it then we will be removing the task from the
+scheduler.
+
+====================
+
+The 3rd module is a sample spring application where i have shown how to integrate the 
+rate-limiter library and use it.
+
+ 
